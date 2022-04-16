@@ -8,6 +8,10 @@ library(reticulate)
 conda_create(envname = "imagereg", channel = c("conda-forge"), packages=c("numpy","matplotlib","scikit-image"))
 ```
 
+```{r setup, cache = F}
+library(reticulate)
+```
+
 ```{python load-packages}
 import numpy as np
 import matplotlib.pyplot as plt
@@ -129,7 +133,7 @@ Using [Optical Flow](https://scikit-image.org/docs/stable/auto_examples/registra
 from skimage.transform import warp
 from skimage.registration import optical_flow_tvl1, optical_flow_ilk
 
-v, u = optical_flow_ilk(xcrop[0], xcrop[3], radius=250, gaussian = True, prefilter = True)
+v, u = optical_flow_tvl1(xcrop[0], xcrop[2]) #, radius=250, gaussian = True, prefilter = True)
 
 
 nr, nc = xcrop[0].shape
@@ -137,25 +141,25 @@ nr, nc = xcrop[0].shape
 row_coords, col_coords = np.meshgrid(np.arange(nr), np.arange(nc),
                                      indexing='ij')
 
-xcrop1_warp = warp(xcrop[3], np.array([row_coords + v, col_coords + u]),
+xcrop1_warp = warp(xcrop[2], np.array([row_coords + v, col_coords + u]),
                    mode='edge')
 
 # build an RGB image with the unregistered sequence
 seq_im = np.zeros((nr, nc, 3))
-seq_im[..., 0] = xcrop[1]
+seq_im[..., 0] = xcrop[2]
 seq_im[..., 1] = xcrop[0]
 seq_im[..., 2] = xcrop[0]
 
 # build an RGB image with the registered sequence
 reg_im = np.zeros((nr, nc, 3))
-reg_im[..., 0] = xcrop1_warp
-reg_im[..., 1] = xcrop[0]
+reg_im[..., 0] = xcrop[0]
+reg_im[..., 1] = xcrop1_warp
 reg_im[..., 2] = xcrop[0]
 
 # build an RGB image with the registered sequence
 target_im = np.zeros((nr, nc, 3))
-target_im[..., 0] = xcrop[0]
-target_im[..., 1] = xcrop[0]
+target_im[..., 0] = xcrop[2]
+target_im[..., 1] = xcrop1_warp
 target_im[..., 2] = xcrop[0]
 
 fig, (ax0, ax1, ax2) = plt.subplots(1, 3, figsize=(5, 10))
@@ -198,7 +202,7 @@ u_ = u[::step, ::step]
 v_ = v[::step, ::step]
 
 ax1.imshow(norm)
-ax1.quiver(x, y, u_, v_, color='r', units='dots',
+ax1.quiver(x, y, u_, v_, color='w', units='dots',
            angles='xy', scale_units='xy', lw=3)
 ax1.set_title("Optical flow magnitude and vector field")
 ax1.set_axis_off()
