@@ -1,0 +1,209 @@
+---
+title: "Testing Alignment Algorithms"
+---
+
+```{r, eval = F, include = F}
+# Set up library
+library(reticulate)
+conda_create(envname = "imagereg", channel = c("conda-forge"), packages=c("numpy","matplotlib","scikit-image"))
+```
+
+```{python load-packages}
+import numpy as np
+import matplotlib.pyplot as plt
+
+from skimage import data
+from skimage.registration import phase_cross_correlation
+from skimage.registration._phase_cross_correlation import _upsampled_dft
+from scipy.ndimage import fourier_shift
+from skimage.util import crop
+from skimage.color import rgb2gray
+
+
+from os import listdir
+from os.path import isfile, join
+import re
+```
+
+```{python read-images}
+
+mypath = 'data' # edit with the path to your data
+files = [f for f in listdir(mypath) if (isfile(join(mypath, f)) and "025_04_L" in f and "tiff" in f)]
+
+x = []
+xcrop = []
+y = []
+
+for file in files:
+    label = file.split(".")[0]
+    y.append(label)
+    img = plt.imread(join(mypath, file))
+    x.append(rgb2gray(img))
+    imgcrop = crop(img, ((200, 200), (200, 200), (0,0)))[:,:,0]
+    xcrop.append(imgcrop/255)
+
+
+```
+
+
+```{python align-attempt}
+imshift, error, diffphase = phase_cross_correlation(xcrop[0], xcrop[3])
+
+fig = plt.figure(figsize=(8, 3))
+ax1 = plt.subplot(1, 3, 1)
+ax2 = plt.subplot(1, 3, 2, sharex=ax1, sharey=ax1)
+ax3 = plt.subplot(1, 3, 3)
+
+ax1.imshow(xcrop[0], cmap='gray')
+ax1.set_axis_off()
+ax1.set_title('Reference image')
+
+ax2.imshow(xcrop[1].real, cmap='gray')
+ax2.set_axis_off()
+ax2.set_title('Offset image')
+
+# Show the output of a cross-correlation to show what the algorithm is
+# doing behind the scenes
+image_product = np.fft.fft2(xcrop[0]) * np.fft.fft2(xcrop[3]).conj()
+cc_image = np.fft.fftshift(np.fft.ifft2(image_product))
+cc_image *= (255.0/cc_image.max())
+ax3.imshow(cc_image.real)
+ax3.set_axis_off()
+ax3.set_title("Cross-correlation")
+
+plt.show()
+
+```
+
+Now need to shift the images around to match: [source](https://stackoverflow.com/questions/27087139/shifting-an-image-in-numpy)... there has to be a built-in function to do this?!?
+
+```{python}
+from skimage.transform import AffineTransform, warp
+
+def shift(image, vector):
+    transform = AffineTransform(translation=[vector[1], vector[0]])
+    shifted = warp(image, transform, mode='wrap', preserve_range=True)
+    shifted = shifted.astype(image.dtype)
+    return shifted
+  
+aligned = [xcrop[0], xcrop[3], shift(xcrop[3], -imshift)]
+
+nr, nc = xcrop[0].shape
+
+# build an RGB image with the unregistered sequence
+seq_im = np.zeros((nr, nc, 3))
+seq_im[..., 0] = aligned[0]
+seq_im[..., 1] = aligned[1]
+seq_im[..., 2] = aligned[0]
+
+# build an RGB image with the registered sequence
+reg_im = np.zeros((nr, nc, 3))
+reg_im[..., 0] = aligned[1]
+reg_im[..., 1] = aligned[2]
+reg_im[..., 2] = aligned[1]
+
+# build an RGB image with the registered sequence
+target_im = np.zeros((nr, nc, 3))
+target_im[..., 0] = aligned[0]
+target_im[..., 1] = aligned[2]
+target_im[..., 2] = aligned[0]
+
+fig, (ax0, ax1, ax2) = plt.subplots(1, 3, figsize=(5, 10))
+
+ax0.imshow(seq_im)
+ax0.set_title("Original")
+
+ax1.imshow(reg_im)
+ax1.set_title("Shifted")
+
+ax2.imshow(target_im)
+ax2.set_title("Aligned w/ Target")
+
+fig.tight_layout()
+plt.show()
+```
+
+Using [Optical Flow](https://scikit-image.org/docs/stable/auto_examples/registration/plot_opticalflow.html#sphx-glr-auto-examples-registration-plot-opticalflow-py) (nonrigid image alignment) would seem to be a better approach.
+
+```{python optical-flow}
+from skimage.transform import warp
+from skimage.registration import optical_flow_tvl1, optical_flow_ilk
+
+v, u = optical_flow_ilk(xcrop[0], xcrop[3], radius=250, gaussian = True, prefilter = True)
+
+
+nr, nc = xcrop[0].shape
+
+row_coords, col_coords = np.meshgrid(np.arange(nr), np.arange(nc),
+                                     indexing='ij')
+
+xcrop1_warp = warp(xcrop[3], np.array([row_coords + v, col_coords + u]),
+                   mode='edge')
+
+# build an RGB image with the unregistered sequence
+seq_im = np.zeros((nr, nc, 3))
+seq_im[..., 0] = xcrop[1]
+seq_im[..., 1] = xcrop[0]
+seq_im[..., 2] = xcrop[0]
+
+# build an RGB image with the registered sequence
+reg_im = np.zeros((nr, nc, 3))
+reg_im[..., 0] = xcrop1_warp
+reg_im[..., 1] = xcrop[0]
+reg_im[..., 2] = xcrop[0]
+
+# build an RGB image with the registered sequence
+target_im = np.zeros((nr, nc, 3))
+target_im[..., 0] = xcrop[0]
+target_im[..., 1] = xcrop[0]
+target_im[..., 2] = xcrop[0]
+
+fig, (ax0, ax1, ax2) = plt.subplots(1, 3, figsize=(5, 10))
+
+ax0.imshow(seq_im)
+ax0.set_title("Unregistered sequence")
+
+ax1.imshow(reg_im)
+ax1.set_title("Registered sequence")
+
+ax2.imshow(target_im)
+ax2.set_title("Target")
+
+fig.tight_layout()
+plt.show()
+
+```
+
+```{python optical-flow-map}
+# --- Compute flow magnitude
+norm = np.sqrt(u ** 2 + v ** 2)
+
+# --- Display
+fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(8, 4))
+
+# --- Sequence image sample
+
+ax0.imshow(reg_im)
+ax0.set_title("Sequence image sample")
+ax0.set_axis_off()
+
+# --- Quiver plot arguments
+
+nvec = 40  # Number of vectors to be displayed along each image dimension
+nl, nc = xcrop[0].shape
+step = max(nl//nvec, nc//nvec)
+
+y, x = np.mgrid[:nl:step, :nc:step]
+u_ = u[::step, ::step]
+v_ = v[::step, ::step]
+
+ax1.imshow(norm)
+ax1.quiver(x, y, u_, v_, color='r', units='dots',
+           angles='xy', scale_units='xy', lw=3)
+ax1.set_title("Optical flow magnitude and vector field")
+ax1.set_axis_off()
+fig.tight_layout()
+
+plt.show()
+
+```

@@ -1,0 +1,17 @@
+Version: 1.0
+
+RestoreWorkspace: Default
+SaveWorkspace: Default
+AlwaysSaveHistory: Default
+
+EnableCodeIndexing: Yes
+UseSpacesForTab: Yes
+NumSpacesForTab: 2
+Encoding: UTF-8
+
+RnwWeave: knitr
+LaTeX: XeLaTeX
+
+PythonType: conda
+PythonVersion: 3.8.13
+PythonPath: ~/anaconda3/envs/imagereg/bin/python3.8
